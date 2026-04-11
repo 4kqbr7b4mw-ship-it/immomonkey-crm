@@ -1,6 +1,8 @@
-import express from 'express';
+
+# Neue server.js mit better-sqlite3 (synchrone API)
+server_js_content = '''import express from 'express';
 import cors from 'cors';
-import sqlite3 from 'sqlite3';
+import Database from 'better-sqlite3';
 import nodemailer from 'nodemailer';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -17,47 +19,47 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // Datenbank initialisieren
-const db = new sqlite3.Database('./leads.db', (err) => {
-  if (err) {
-    console.error('Datenbankfehler:', err);
-  } else {
-    console.log('Mit SQLite-Datenbank verbunden');
-    initDatabase();
-  }
-});
+let db;
+try {
+  db = new Database('./leads.db');
+  console.log('Mit SQLite-Datenbank verbunden');
+  initDatabase();
+} catch (err) {
+  console.error('Datenbankfehler:', err);
+  process.exit(1);
+}
 
 // Datenbank-Schema erstellen
 function initDatabase() {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS leads (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      phone TEXT,
-      email TEXT,
-      location TEXT,
-      object_type TEXT,
-      living_area TEXT,
-      land_area TEXT,
-      construction_year TEXT,
-      condition TEXT,
-      special_features TEXT,
-      sales_intent TEXT,
-      motivation TEXT,
-      price_expectation TEXT,
-      score TEXT,
-      pipeline_stage TEXT,
-      next_step TEXT,
-      has_contact INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `, (err) => {
-    if (err) {
-      console.error('Fehler beim Erstellen der Tabelle:', err);
-    } else {
-      console.log('Leads-Tabelle bereit');
-    }
-  });
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS leads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT,
+        email TEXT,
+        location TEXT,
+        object_type TEXT,
+        living_area TEXT,
+        land_area TEXT,
+        construction_year TEXT,
+        condition TEXT,
+        special_features TEXT,
+        sales_intent TEXT,
+        motivation TEXT,
+        price_expectation TEXT,
+        score TEXT,
+        pipeline_stage TEXT,
+        next_step TEXT,
+        has_contact INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Leads-Tabelle bereit');
+  } catch (err) {
+    console.error('Fehler beim Erstellen der Tabelle:', err);
+  }
 }
 
 // E-Mail-Transporter konfigurieren
@@ -116,28 +118,26 @@ function suggestNextStep(pipelineStage, score) {
 
 // Alle Leads abrufen
 app.get('/api/leads', (req, res) => {
-  db.all('SELECT * FROM leads ORDER BY created_at DESC', [], (err, rows) => {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
-    }
+  try {
+    const rows = db.all('SELECT * FROM leads ORDER BY created_at DESC');
     res.json(rows);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Einzelnen Lead abrufen
 app.get('/api/leads/:id', (req, res) => {
-  db.get('SELECT * FROM leads WHERE id = ?', [req.params.id], (err, row) => {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
-    }
+  try {
+    const row = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
     if (!row) {
       res.status(404).json({ error: 'Lead nicht gefunden' });
       return;
     }
     res.json(row);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Neuen Lead erstellen
@@ -164,14 +164,11 @@ app.post('/api/leads', (req, res) => {
     lead.price_expectation, score, pipelineStage, nextStep, hasContact ? 1 : 0
   ];
   
-  db.run(sql, params, function(err) {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
-    }
+  try {
+    const result = db.run(sql, params);
     
     const newLead = {
-      id: this.lastID,
+      id: result.lastInsertRowid,
       ...lead,
       score,
       pipeline_stage: pipelineStage,
@@ -183,7 +180,9 @@ app.post('/api/leads', (req, res) => {
     }
     
     res.status(201).json(newLead);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Lead aktualisieren
@@ -213,68 +212,61 @@ app.put('/api/leads/:id', (req, res) => {
     req.params.id
   ];
   
-  db.run(sql, params, function(err) {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
-    }
-    if (this.changes === 0) {
+  try {
+    const result = db.run(sql, params);
+    if (result.changes === 0) {
       res.status(404).json({ error: 'Lead nicht gefunden' });
       return;
     }
     res.json({
-      id: req.params.id,
+      id: parseInt(req.params.id),
       ...lead,
       score,
       pipeline_stage: pipelineStage,
       next_step: nextStep
     });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Lead löschen
 app.delete('/api/leads/:id', (req, res) => {
-  db.run('DELETE FROM leads WHERE id = ?', [req.params.id], function(err) {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
-    }
-    if (this.changes === 0) {
+  try {
+    const result = db.run('DELETE FROM leads WHERE id = ?', [req.params.id]);
+    if (result.changes === 0) {
       res.status(404).json({ error: 'Lead nicht gefunden' });
       return;
     }
     res.json({ message: 'Lead gelöscht' });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // E-Mail an Lead senden
 app.post('/api/leads/:id/send-email', async (req, res) => {
   const { subject, message } = req.body;
   
-  db.get('SELECT * FROM leads WHERE id = ?', [req.params.id], async (err, lead) => {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
-    }
+  try {
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
     if (!lead || !lead.email) {
       res.status(404).json({ error: 'Lead oder E-Mail nicht gefunden' });
       return;
     }
     
-    try {
-      await transporter.sendMail({
-        from: process.env.SMTP_USER,
-        to: lead.email,
-        subject: subject,
-        text: message,
-        html: `<p>${message.replace(/\n/g, '<br>')}</p>`
-      });
-      
-      res.json({ message: 'E-Mail erfolgreich gesendet' });
-    } catch (emailErr) {
-      res.status(500).json({ error: 'E-Mail konnte nicht gesendet werden: ' + emailErr.message });
-    }
-  });
+    await transporter.sendMail({
+      from: process.env.SMTP_USER,
+      to: lead.email,
+      subject: subject,
+      text: message,
+      html: `<p>${message.replace(/\\n/g, '<br>')}</p>`
+    });
+    
+    res.json({ message: 'E-Mail erfolgreich gesendet' });
+  } catch (err) {
+    res.status(500).json({ error: 'E-Mail konnte nicht gesendet werden: ' + err.message });
+  }
 });
 
 // Benachrichtigungs-E-Mail an Betreiber senden
@@ -338,7 +330,7 @@ async function sendNotificationEmail(lead) {
   
   try {
     await transporter.sendMail({
-      from: `"Immomonkey CRM" <${process.env.SMTP_USER}>`,
+      from: `\"Immomonkey CRM\" <${process.env.SMTP_USER}>`,
       to: process.env.NOTIFICATION_EMAIL,
       subject: `🐵 Neuer Lead: ${lead.name} aus ${lead.location}`,
       html: html
@@ -376,15 +368,11 @@ app.post('/api/leads/public', (req, res) => {
     '', score, pipelineStage, nextStep, 0
   ];
   
-  db.run(sql, params, function(err) {
-    if (err) {
-      console.error('Fehler beim Speichern des Leads:', err);
-      res.status(500).json({ error: 'Fehler beim Speichern. Bitte versuchen Sie es später erneut.' });
-      return;
-    }
+  try {
+    const result = db.run(sql, params);
     
     const newLead = {
-      id: this.lastID,
+      id: result.lastInsertRowid,
       ...lead,
       score,
       pipeline_stage: pipelineStage,
@@ -400,9 +388,12 @@ app.post('/api/leads/public', (req, res) => {
     res.status(201).json({ 
       success: true, 
       message: 'Lead erfolgreich erstellt',
-      leadId: this.lastID 
+      leadId: result.lastInsertRowid 
     });
-  });
+  } catch (err) {
+    console.error('Fehler beim Speichern des Leads:', err);
+    res.status(500).json({ error: 'Fehler beim Speichern. Bitte versuchen Sie es später erneut.' });
+  }
 });
 
 // Willkommens-E-Mail an neuen Lead
@@ -449,7 +440,7 @@ async function sendWelcomeEmail(lead) {
   
   try {
     await transporter.sendMail({
-      from: `"Immomonkey" <${process.env.SMTP_USER}>`,
+      from: `\"Immomonkey\" <${process.env.SMTP_USER}>`,
       to: lead.email,
       subject: subject,
       html: html
@@ -513,7 +504,7 @@ async function sendDataRequestEmail(lead) {
   
   try {
     await transporter.sendMail({
-      from: `"Immomonkey" <${process.env.SMTP_USER}>`,
+      from: `\"Immomonkey\" <${process.env.SMTP_USER}>`,
       to: lead.email,
       subject: subject,
       html: html
@@ -526,32 +517,19 @@ async function sendDataRequestEmail(lead) {
 
 // Statistiken abrufen
 app.get('/api/stats', (req, res) => {
-  db.get('SELECT COUNT(*) as total FROM leads', [], (err, totalRow) => {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
-    }
+  try {
+    const totalRow = db.get('SELECT COUNT(*) as total FROM leads');
+    const pipelineRows = db.all('SELECT pipeline_stage, COUNT(*) as count FROM leads GROUP BY pipeline_stage');
+    const scoreRows = db.all('SELECT score, COUNT(*) as count FROM leads GROUP BY score');
     
-    db.all('SELECT pipeline_stage, COUNT(*) as count FROM leads GROUP BY pipeline_stage', [], (err, pipelineRows) => {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
-      }
-      
-      db.all('SELECT score, COUNT(*) as count FROM leads GROUP BY score', [], (err, scoreRows) => {
-        if (err) {
-          res.status(500).json({ error: err.message });
-          return;
-        }
-        
-        res.json({
-          total: totalRow.total,
-          by_pipeline: pipelineRows,
-          by_score: scoreRows
-        });
-      });
+    res.json({
+      total: totalRow.total,
+      by_pipeline: pipelineRows,
+      by_score: scoreRows
     });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Frontend für alle anderen Routen
@@ -567,11 +545,25 @@ app.listen(PORT, () => {
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-  db.close((err) => {
-    if (err) {
-      console.error(err.message);
-    }
+  try {
+    db.close();
     console.log('Datenbankverbindung geschlossen');
-    process.exit(0);
-  });
+  } catch (err) {
+    console.error(err.message);
+  }
+  process.exit(0);
 });
+'''
+
+# Speichern
+with open('/mnt/kimi/output/server_better_sqlite3.js', 'w', encoding='utf-8') as f:
+    f.write(server_js_content)
+
+print("✅ Neue server.js mit better-sqlite3 erstellt!")
+print("\nWichtige Änderungen:")
+print("- import sqlite3 → import Database from 'better-sqlite3'")
+print("- Asynchrone Callbacks → Synchrone API")
+print("- db.run() → db.run() mit return value")
+print("- db.get() → db.get() synchron")
+print("- db.all() → db.all() synchron")
+print("- db.exec() für CREATE TABLE")
