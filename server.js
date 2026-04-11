@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
-import Database from 'better-sqlite3';
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
 import nodemailer from 'nodemailer';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -16,21 +17,21 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// Datenbank initialisieren
+// Datenbank-Variable
 let db;
-try {
-  db = new Database('./leads.db');
-  console.log('Mit SQLite-Datenbank verbunden');
-  initDatabase();
-} catch (err) {
-  console.error('Datenbankfehler:', err);
-  process.exit(1);
-}
 
-// Datenbank-Schema erstellen
-function initDatabase() {
+// Datenbank initialisieren (SQLite mit sqlite3)
+async function initDatabase() {
   try {
-    db.exec(`
+    db = await open({
+      filename: './leads.db',
+      driver: sqlite3.Database
+    });
+
+    console.log('Mit SQLite-Datenbank verbunden');
+
+    // Tabelle erstellen
+    await db.exec(`
       CREATE TABLE IF NOT EXISTS leads (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -54,9 +55,11 @@ function initDatabase() {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
     console.log('Leads-Tabelle bereit');
   } catch (err) {
-    console.error('Fehler beim Erstellen der Tabelle:', err);
+    console.error('Datenbankfehler:', err);
+    process.exit(1);
   }
 }
 
@@ -115,9 +118,9 @@ function suggestNextStep(pipelineStage, score) {
 // API-Endpunkte
 
 // Alle Leads abrufen
-app.get('/api/leads', (req, res) => {
+app.get('/api/leads', async (req, res) => {
   try {
-    const rows = db.all('SELECT * FROM leads ORDER BY created_at DESC');
+    const rows = await db.all('SELECT * FROM leads ORDER BY created_at DESC');
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -125,9 +128,9 @@ app.get('/api/leads', (req, res) => {
 });
 
 // Einzelnen Lead abrufen
-app.get('/api/leads/:id', (req, res) => {
+app.get('/api/leads/:id', async (req, res) => {
   try {
-    const row = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    const row = await db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
     if (!row) {
       res.status(404).json({ error: 'Lead nicht gefunden' });
       return;
@@ -139,7 +142,7 @@ app.get('/api/leads/:id', (req, res) => {
 });
 
 // Neuen Lead erstellen
-app.post('/api/leads', (req, res) => {
+app.post('/api/leads', async (req, res) => {
   const lead = req.body;
 
   const score = computeScore(lead.motivation || '', lead.sales_intent || '');
@@ -163,10 +166,10 @@ app.post('/api/leads', (req, res) => {
   ];
 
   try {
-    const result = db.run(sql, params);
+    const result = await db.run(sql, params);
 
     const newLead = {
-      id: result.lastInsertRowid,
+      id: result.lastID,
       ...lead,
       score,
       pipeline_stage: pipelineStage,
@@ -184,7 +187,7 @@ app.post('/api/leads', (req, res) => {
 });
 
 // Lead aktualisieren
-app.put('/api/leads/:id', (req, res) => {
+app.put('/api/leads/:id', async (req, res) => {
   const lead = req.body;
 
   const score = computeScore(lead.motivation || '', lead.sales_intent || '');
@@ -211,7 +214,7 @@ app.put('/api/leads/:id', (req, res) => {
   ];
 
   try {
-    const result = db.run(sql, params);
+    const result = await db.run(sql, params);
     if (result.changes === 0) {
       res.status(404).json({ error: 'Lead nicht gefunden' });
       return;
@@ -229,9 +232,9 @@ app.put('/api/leads/:id', (req, res) => {
 });
 
 // Lead loeschen
-app.delete('/api/leads/:id', (req, res) => {
+app.delete('/api/leads/:id', async (req, res) => {
   try {
-    const result = db.run('DELETE FROM leads WHERE id = ?', [req.params.id]);
+    const result = await db.run('DELETE FROM leads WHERE id = ?', [req.params.id]);
     if (result.changes === 0) {
       res.status(404).json({ error: 'Lead nicht gefunden' });
       return;
@@ -247,7 +250,7 @@ app.post('/api/leads/:id/send-email', async (req, res) => {
   const { subject, message } = req.body;
 
   try {
-    const lead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    const lead = await db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
     if (!lead || !lead.email) {
       res.status(404).json({ error: 'Lead oder E-Mail nicht gefunden' });
       return;
@@ -274,7 +277,7 @@ async function sendNotificationEmail(lead) {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
       <div style="background: linear-gradient(135deg, #1a472a 0%, #2d5a3d 100%); padding: 20px; text-align: center;">
-        <h1 style="color: white; margin: 0; font-size: 24px;"> Neuer Lead eingegangen</h1>
+        <h1 style="color: white; margin: 0; font-size: 24px;">Neuer Lead eingegangen</h1>
       </div>
 
       <div style="padding: 30px; background: #fff;">
@@ -330,7 +333,7 @@ async function sendNotificationEmail(lead) {
     await transporter.sendMail({
       from: '"Immomonkey CRM" <' + process.env.SMTP_USER + '>',
       to: process.env.NOTIFICATION_EMAIL,
-      subject: ' Neuer Lead: ' + lead.name + ' aus ' + lead.location,
+      subject: 'Neuer Lead: ' + lead.name + ' aus ' + lead.location,
       html: html
     });
     console.log('Benachrichtigungs-E-Mail gesendet an:', process.env.NOTIFICATION_EMAIL);
@@ -340,7 +343,7 @@ async function sendNotificationEmail(lead) {
 }
 
 // OEFFENTLICHER API-ENDPUNKT fuer Website-Widget
-app.post('/api/leads/public', (req, res) => {
+app.post('/api/leads/public', async (req, res) => {
   const lead = req.body;
 
   if (!lead.name || !lead.email || !lead.phone || !lead.location) {
@@ -367,10 +370,10 @@ app.post('/api/leads/public', (req, res) => {
   ];
 
   try {
-    const result = db.run(sql, params);
+    const result = await db.run(sql, params);
 
     const newLead = {
-      id: result.lastInsertRowid,
+      id: result.lastID,
       ...lead,
       score,
       pipeline_stage: pipelineStage,
@@ -386,7 +389,7 @@ app.post('/api/leads/public', (req, res) => {
     res.status(201).json({ 
       success: true, 
       message: 'Lead erfolgreich erstellt',
-      leadId: result.lastInsertRowid 
+      leadId: result.lastID 
     });
   } catch (err) {
     console.error('Fehler beim Speichern des Leads:', err);
@@ -402,7 +405,7 @@ async function sendWelcomeEmail(lead) {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
       <div style="background: linear-gradient(135deg, #1a472a 0%, #2d5a3d 100%); padding: 30px; text-align: center;">
-        <h1 style="color: white; margin: 0; font-size: 28px;"> Immomonkey</h1>
+        <h1 style="color: white; margin: 0; font-size: 28px;">Immomonkey</h1>
         <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0;">Ihr Immobilien-Stratege</p>
       </div>
 
@@ -457,7 +460,7 @@ async function sendDataRequestEmail(lead) {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
       <div style="background: linear-gradient(135deg, #1a472a 0%, #2d5a3d 100%); padding: 30px; text-align: center;">
-        <h1 style="color: white; margin: 0; font-size: 28px;"> Immomonkey</h1>
+        <h1 style="color: white; margin: 0; font-size: 28px;">Immomonkey</h1>
         <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0;">Ihr Immobilien-Stratege</p>
       </div>
 
@@ -514,11 +517,11 @@ async function sendDataRequestEmail(lead) {
 }
 
 // Statistiken abrufen
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
   try {
-    const totalRow = db.get('SELECT COUNT(*) as total FROM leads');
-    const pipelineRows = db.all('SELECT pipeline_stage, COUNT(*) as count FROM leads GROUP BY pipeline_stage');
-    const scoreRows = db.all('SELECT score, COUNT(*) as count FROM leads GROUP BY score');
+    const totalRow = await db.get('SELECT COUNT(*) as total FROM leads');
+    const pipelineRows = await db.all('SELECT pipeline_stage, COUNT(*) as count FROM leads GROUP BY pipeline_stage');
+    const scoreRows = await db.all('SELECT score, COUNT(*) as count FROM leads GROUP BY score');
 
     res.json({
       total: totalRow.total,
@@ -536,15 +539,21 @@ app.get('*', (req, res) => {
 });
 
 // Server starten
-app.listen(PORT, () => {
-  console.log('Server laeuft auf Port ' + PORT);
-  console.log('API verfuegbar unter http://localhost:' + PORT + '/api');
-});
+async function startServer() {
+  await initDatabase();
+
+  app.listen(PORT, () => {
+    console.log('Server laeuft auf Port ' + PORT);
+    console.log('API verfuegbar unter http://localhost:' + PORT + '/api');
+  });
+}
+
+startServer();
 
 // Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   try {
-    db.close();
+    await db.close();
     console.log('Datenbankverbindung geschlossen');
   } catch (err) {
     console.error(err.message);
