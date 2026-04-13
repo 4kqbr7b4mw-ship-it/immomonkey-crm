@@ -553,7 +553,60 @@ app.post('/api/leads/:id/status', (req, res) => {
     });
   }
 });
+app.get('/api/stats', (req, res) => {
+  try {
+    const leads = loadLeads();
 
+    const statusToStage = {
+      new: 'Neu',
+      contact_attempt: 'Kontaktversuch',
+      contacted: 'Kontakt hergestellt',
+      qualified: 'Qualifiziert',
+      appointment_scheduled: 'Termin geplant',
+      analysis_in_progress: 'Bewertung / Analyse läuft',
+      offer_sent: 'Angebot / Beratung abgegeben',
+      follow_up: 'Nachfassen',
+      won: 'Gewonnen',
+      lost: 'Verloren',
+      archived: 'Archiv'
+    };
+
+    const pipelineStages = [
+      'Neu',
+      'Kontaktversuch',
+      'Kontakt hergestellt',
+      'Qualifiziert',
+      'Termin geplant',
+      'Bewertung / Analyse läuft',
+      'Angebot / Beratung abgegeben',
+      'Nachfassen',
+      'Gewonnen',
+      'Verloren',
+      'Archiv'
+    ];
+
+    const stats = {
+      total: leads.length,
+      by_pipeline: pipelineStages.map(stage => ({
+        pipeline_stage: stage,
+        count: leads.filter(l => statusToStage[l.status] === stage).length
+      })),
+      by_score: ['A', 'B', 'C'].map(score => ({
+        score,
+        count: leads.filter(l => l.score === score).length
+      }))
+    };
+
+    res.json(stats);
+  } catch (error) {
+    console.error('Fehler in /api/stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
 app.post('/api/leads/:id/email', async (req, res) => {
   try {
     const leads = loadLeads();
