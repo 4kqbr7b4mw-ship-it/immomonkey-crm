@@ -276,9 +276,34 @@ app.get('/api/stats', (req, res) => {
 
     const stats = {
       total: leads.length,
-      new: leads.filter(l => l.status === 'new').length,
-      contacted: leads.filter(l => l.status === 'contacted').length,
-      qualified: leads.filter(l => l.status === 'qualified').length
+      by_pipeline: [
+        {
+          label: 'Neuer Lead',
+          count: leads.filter(l => l.status === 'new').length
+        },
+        {
+          label: 'Kontakt hergestellt',
+          count: leads.filter(l => l.status === 'contacted').length
+        },
+        {
+          label: 'Qualifiziert',
+          count: leads.filter(l => l.status === 'qualified').length
+        }
+      ],
+      by_score: [
+        {
+          label: 'A',
+          count: leads.filter(l => l.score === 'A').length
+        },
+        {
+          label: 'B',
+          count: leads.filter(l => l.score === 'B').length
+        },
+        {
+          label: 'C',
+          count: leads.filter(l => l.score === 'C').length
+        }
+      ]
     };
 
     res.json(stats);
@@ -404,7 +429,6 @@ app.post('/api/leads/public', async (req, res) => {
   }
 });
 
-// Lead bearbeiten im CRM
 app.put('/api/leads/:id', (req, res) => {
   try {
     const leads = loadLeads();
