@@ -270,6 +270,79 @@ app.get('/api/leads', (req, res) => {
   res.json(leads);
 });
 
+app.get('/api/stats', (req, res) => {
+  try {
+    const leads = loadLeads();
+
+    const stats = {
+      total: leads.length,
+      new: leads.filter(l => l.status === 'new').length,
+      contacted: leads.filter(l => l.status === 'contacted').length,
+      qualified: leads.filter(l => l.status === 'qualified').length
+    };
+
+    res.json(stats);
+  } catch (error) {
+    console.error('Fehler in /api/stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+// Manuelles Anlegen im CRM
+app.post('/api/leads', (req, res) => {
+  try {
+    const leads = loadLeads();
+
+    const newLead = {
+      id: Date.now(),
+      name: String(req.body.name || '').trim(),
+      phone: String(req.body.phone || '').trim(),
+      email: String(req.body.email || '').trim(),
+      location: String(req.body.location || '').trim(),
+      object_type: String(req.body.object_type || '').trim(),
+      living_area: String(req.body.living_area || '').trim(),
+      land_area: String(req.body.land_area || '').trim(),
+      construction_year: String(req.body.construction_year || '').trim(),
+      condition: String(req.body.condition || '').trim(),
+      special_features: String(req.body.special_features || '').trim(),
+      sales_intent: String(req.body.sales_intent || '').trim(),
+      motivation: String(req.body.motivation || '').trim(),
+      price_expectation: String(req.body.price_expectation || '').trim(),
+      has_contact: req.body.has_contact === true,
+      status: 'new',
+      source: 'crm_manual',
+      createdAt: new Date().toISOString()
+    };
+
+    if (!newLead.name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name ist erforderlich'
+      });
+    }
+
+    leads.unshift(newLead);
+    saveLeads(leads);
+
+    res.status(201).json({
+      success: true,
+      message: 'Lead erfolgreich erstellt',
+      data: newLead
+    });
+  } catch (error) {
+    console.error('Fehler in /api/leads:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
 app.post('/api/leads/public', async (req, res) => {
   try {
     const { name, email, phone, location, object_type, source } = req.body;
@@ -323,6 +396,88 @@ app.post('/api/leads/public', async (req, res) => {
     });
   } catch (error) {
     console.error('Fehler in /api/leads/public:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+// Lead bearbeiten im CRM
+app.put('/api/leads/:id', (req, res) => {
+  try {
+    const leads = loadLeads();
+    const lead = leads.find(l => l.id === parseInt(req.params.id, 10));
+
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lead not found'
+      });
+    }
+
+    lead.name = String(req.body.name || '').trim();
+    lead.phone = String(req.body.phone || '').trim();
+    lead.email = String(req.body.email || '').trim();
+    lead.location = String(req.body.location || '').trim();
+    lead.object_type = String(req.body.object_type || '').trim();
+    lead.living_area = String(req.body.living_area || '').trim();
+    lead.land_area = String(req.body.land_area || '').trim();
+    lead.construction_year = String(req.body.construction_year || '').trim();
+    lead.condition = String(req.body.condition || '').trim();
+    lead.special_features = String(req.body.special_features || '').trim();
+    lead.sales_intent = String(req.body.sales_intent || '').trim();
+    lead.motivation = String(req.body.motivation || '').trim();
+    lead.price_expectation = String(req.body.price_expectation || '').trim();
+    lead.has_contact = req.body.has_contact === true;
+    lead.updatedAt = new Date().toISOString();
+
+    if (!lead.name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name ist erforderlich'
+      });
+    }
+
+    saveLeads(leads);
+
+    res.json({
+      success: true,
+      message: 'Lead erfolgreich aktualisiert',
+      data: lead
+    });
+  } catch (error) {
+    console.error('Fehler in PUT /api/leads/:id:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+app.delete('/api/leads/:id', (req, res) => {
+  try {
+    const leads = loadLeads();
+    const index = leads.findIndex(l => l.id === parseInt(req.params.id, 10));
+
+    if (index === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lead not found'
+      });
+    }
+
+    leads.splice(index, 1);
+    saveLeads(leads);
+
+    res.json({
+      success: true,
+      message: 'Lead gelöscht'
+    });
+  } catch (error) {
+    console.error('Fehler in DELETE /api/leads/:id:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
