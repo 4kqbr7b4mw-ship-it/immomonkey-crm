@@ -12,6 +12,20 @@ const NOTIFICATION_EMAIL = process.env.NOTIFICATION_EMAIL || 'office@immomonkey.
 const SENDER_EMAIL = NOTIFICATION_EMAIL;
 const SENDER_NAME = 'Immomonkey CRM';
 
+const WORKFLOW_STATUSES = [
+  { value: 'new', label: 'Neu' },
+  { value: 'contact_attempt', label: 'Kontaktversuch' },
+  { value: 'contacted', label: 'Kontakt hergestellt' },
+  { value: 'qualified', label: 'Qualifiziert' },
+  { value: 'appointment_scheduled', label: 'Termin geplant' },
+  { value: 'analysis_in_progress', label: 'Bewertung / Analyse läuft' },
+  { value: 'offer_sent', label: 'Angebot / Beratung abgegeben' },
+  { value: 'follow_up', label: 'Nachfassen' },
+  { value: 'won', label: 'Gewonnen' },
+  { value: 'lost', label: 'Verloren' },
+  { value: 'archived', label: 'Archiv' }
+];
+
 // -----------------------------
 // Middleware
 // -----------------------------
@@ -276,20 +290,11 @@ app.get('/api/stats', (req, res) => {
 
     const stats = {
       total: leads.length,
-      by_pipeline: [
-        {
-          label: 'Neuer Lead',
-          count: leads.filter(l => l.status === 'new').length
-        },
-        {
-          label: 'Kontakt hergestellt',
-          count: leads.filter(l => l.status === 'contacted').length
-        },
-        {
-          label: 'Qualifiziert',
-          count: leads.filter(l => l.status === 'qualified').length
-        }
-      ],
+      by_pipeline: WORKFLOW_STATUSES.map(status => ({
+        label: status.label,
+        value: status.value,
+        count: leads.filter(l => l.status === status.value).length
+      })),
       by_score: [
         {
           label: 'A',
@@ -519,6 +524,15 @@ app.post('/api/leads/:id/status', (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Lead not found'
+      });
+    }
+
+    const allowedStatuses = WORKFLOW_STATUSES.map(s => s.value);
+
+    if (!allowedStatuses.includes(req.body.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Ungültiger Status'
       });
     }
 
